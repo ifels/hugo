@@ -37,6 +37,7 @@ var serverInterface string
 var serverWatch bool
 var serverAppend bool
 var disableLiveReload bool
+var withoutListen bool
 
 //var serverCmdV *cobra.Command
 
@@ -57,6 +58,7 @@ func init() {
 	serverCmd.Flags().BoolVar(&disableLiveReload, "disableLiveReload", false, "watch without enabling live browser reload on rebuild")
 	serverCmd.Flags().String("memstats", "", "log memory usage to this file")
 	serverCmd.Flags().Int("meminterval", 100, "interval to poll memory usage (requires --memstats)")
+	serverCmd.Flags().BoolVar(&withoutListen, "withoutListen", false, "only create the web files, not start webserver")
 	serverCmd.Run = server
 }
 
@@ -75,17 +77,23 @@ func server(cmd *cobra.Command, args []string) {
 		serverWatch = true
 	}
 
-	l, err := net.Listen("tcp", net.JoinHostPort(serverInterface, strconv.Itoa(serverPort)))
-	if err == nil {
-		l.Close()
-	} else {
-		jww.ERROR.Println("port", serverPort, "already in use, attempting to use an available port")
-		sp, err := helpers.FindAvailablePort()
-		if err != nil {
-			jww.ERROR.Println("Unable to find alternative port to use")
-			jww.ERROR.Fatalln(err)
+	fmt.Println(".....withoutListen = ", withoutListen)
+
+	if !withoutListen {
+		fmt.Println(".....check port....")
+
+		l, err := net.Listen("tcp", net.JoinHostPort(serverInterface, strconv.Itoa(serverPort)))
+		if err == nil {
+			l.Close()
+		} else {
+			jww.ERROR.Println("port", serverPort, "already in use, attempting to use an available port")
+			sp, err := helpers.FindAvailablePort()
+			if err != nil {
+				jww.ERROR.Println("Unable to find alternative port to use")
+				jww.ERROR.Fatalln(err)
+			}
+			serverPort = sp.Port
 		}
-		serverPort = sp.Port
 	}
 
 	viper.Set("port", serverPort)
@@ -102,23 +110,25 @@ func server(cmd *cobra.Command, args []string) {
 
 	build(serverWatch)
 
-	// Watch runs its own server as part of the routine
-	if serverWatch {
-		watched := getDirList()
-		workingDir := helpers.AbsPathify(viper.GetString("WorkingDir"))
-		for i, dir := range watched {
-			watched[i], _ = helpers.GetRelativePath(dir, workingDir)
-		}
-		unique := strings.Join(helpers.RemoveSubpaths(watched), ",")
+	if !withoutListen {
+		// Watch runs its own server as part of the routine
+		if serverWatch {
+			watched := getDirList()
+			workingDir := helpers.AbsPathify(viper.GetString("WorkingDir"))
+			for i, dir := range watched {
+				watched[i], _ = helpers.GetRelativePath(dir, workingDir)
+			}
+			unique := strings.Join(helpers.RemoveSubpaths(watched), ",")
 
-		jww.FEEDBACK.Printf("Watching for changes in %s/{%s}\n", workingDir, unique)
-		err := NewWatcher(serverPort)
-		if err != nil {
-			fmt.Println(err)
+			jww.FEEDBACK.Printf("Watching for changes in %s/{%s}\n", workingDir, unique)
+			err := NewWatcher(serverPort)
+			if err != nil {
+				fmt.Println(err)
+			}
 		}
+
+		serve(serverPort)
 	}
-
-	serve(serverPort)
 }
 
 func serve(port int) {
